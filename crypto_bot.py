@@ -4,14 +4,12 @@ import crypto_bot_auth as cauth
 
 def bitAlert():
 
-    global count, scheduler
+    global scheduler
 
     result = requests.get("https://api.cryptoquant.com/v1/btc/exchange-flows/inflow?exchange=all_exchange&window=block&limit=5",
         headers = {
             'Authorization': cauth.Authorization_cryptoquant
         }).json()
-
-    print(result)
 
     if (result['result']['data'][0]["inflow_mean"] > 5):
         requests.post("https://slack.com/api/chat.postMessage",
