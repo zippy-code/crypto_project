@@ -21,8 +21,7 @@ def bitAlert():
                 "text": str(result['result']['data'][0]["inflow_mean"]) +"개 비트코인 -> 거래소 이동 포착! "
                 }
             )
-        print(str(result['result']['data'][0]["inflow_mean"]) + "개 비트코인 -> 거래소 이동 포착!")
-    print(str(result['result']['data'][0]["inflow_mean"]))
+
 scheduler = BlockingScheduler()
 scheduler.add_job(bitAlert, 'interval', seconds = 5, id = 'example', args = [])
 
