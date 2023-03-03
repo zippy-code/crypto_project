@@ -1,0 +1,2 @@
+G_API_KEY = "sXowrrfuKRcscgr79eQm3NIiztBOukQEQaQr3w3knkocvsfpkzgHaIADu5s2IkzX"
+G_SECRET_KEY = "aSAsPz8am4Hf4ZlMcT34GrIocwk8UUSeyD9uNzZhA132jeyqmv5vCShqxiXQzphk"
