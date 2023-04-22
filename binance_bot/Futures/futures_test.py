@@ -6,6 +6,11 @@ import sys
 import logging
 import pandas as pd
 import asyncio
+import atexit
+import threading
+from threading import Thread
+import time
+import json
 
 # 상위 폴더 파일 import를 위함
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
@@ -17,6 +22,7 @@ from binance.lib.utils import config_logging
 from binance.error import ClientError
 from binance.streams import AsyncClient, BinanceSocketManager
 from datetime import datetime
+
 
 ####################################################################
 # global values
@@ -32,7 +38,9 @@ g_secret_key = conf.G_SECRET_KEY    # binance secret key
 class UmFuture():
     def __init__(self):
         self.um_futures_client = UMFutures(key=g_api_key, secret=g_secret_key)       
-
+        self.data = {}
+        self.lock = asyncio.Lock()
+        self.loop = asyncio.get_event_loop()
     ####################################################################
     # change_leverage(self, symbol: str, leverage: int, **kwargs)
     # leverage 조정을 위한 메소드. 
@@ -70,7 +78,7 @@ class UmFuture():
         return response
 
     ####################################################################
-    # account(self, **kwargs)
+    # account_assets(self, **kwargs)
     # 잔고와 포지션을 조회하기 위한 메소드.
     #
     # recvWindow:   응답 대기시간(millisec)
@@ -108,7 +116,7 @@ class UmFuture():
         return response
 
     ####################################################################
-    # account(self, **kwargs)
+    # candles_info(self, **kwargs)
     # 잔고와 포지션을 조회하기 위한 메소드.
     #
     # recvWindow:   응답 대기시간(millisec)
@@ -141,32 +149,46 @@ class UmFuture():
         df.set_index(['Open_time'], inplace=True)
 
         return df
-    
-    ####################################################################
-    # book_ticker()
-    # 호가창에 대한 정보
-    #
-    # 사용자 -> API를 이용한 데이터 요청 -> 거래소 -> 사용자의 요청 수신 -> 데이터 전달 -> 데이터 수신
-    # 위 과정에서 오차가 발생할 수 있다. 
-    # 문제를 해결하기 위해서 Websocket을 사용해야 한다.
-    ####################################################################
-    async def book_ticker_info(self, coin_symbol: str, response):
+
+    async def set_data(self, key, value):
+        self.data[key] = value
+
+    async def get_data(self, key):
+        return self.data.get(key)
+
+    async def book_ticker_info(self, coin_symbol):
         client = await AsyncClient.create()
         manager = BinanceSocketManager(client)
         ts = manager.symbol_book_ticker_socket(coin_symbol)
-        
+        count = 0
+
         async with ts as res:
             while True:
                 ret = await res.recv()
-                response = ret
-    
-    async def run(self, response):
-        await asyncio.wait([
-            asyncio.ensure_future(self.book_ticker_info("BTCUSDT", response)),
-        ])
+                await self.set_data(count, ret)
+                #print(f"Data set: key={coin_symbol}, value={ret}")
+                count += 1
+                
+    async def run(self):
+        await asyncio.gather(
+            self.book_ticker_info("BTCUSDT"),
+        )
 
-um_future = UmFuture()
+    def start(self):
+        atexit.register(self.loop.close)
+        self.loop.run_until_complete(self.run()) 
 
-response = []
-asyncio.run(um_future.run(response))
-print(response)
+
+def reader(storage, key):
+    while not storage.loop.is_closed(): 
+        loop = storage.loop
+        value = loop.call_soon_threadsafe(asyncio.run_coroutine_threadsafe, storage.get_data(key), loop).result()
+        #print(f"Data read: key={key}, value={value}")
+
+if __name__ == '__main__':
+    um_future = UmFuture()
+    storage_thread = Thread(target=um_future.start)
+    storage_thread.start()
+    # 스레드를 종료하지 않고 계속 실행되도록 설정
+    while True:
+        pass
