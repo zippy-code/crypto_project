@@ -78,12 +78,11 @@ class UmFuture():
         return response
 
     ####################################################################
-    # account_assets(self, **kwargs)
+    # account_assets(self, asset_symbol: str)
     # 잔고와 포지션을 조회하기 위한 메소드.
     #
-    # recvWindow:   응답 대기시간(millisec)
+    # asset_symbol:     확인하고자 하는 정보 (USDT 등)
     #
-    # 포지션은 positionAmt 를 확인한다.(계약한 수량) long은 양수로, short는 음수로 나온다.
     ####################################################################
     def account_assets(self, asset_symbol: str):
         try:
@@ -99,7 +98,13 @@ class UmFuture():
                 .format(error.status_code, error.error_code, error.error_message))
         
         return response
-
+####################################################################
+    # account_positions(self, asset_symbol: str)
+    # 잔고와 포지션을 조회하기 위한 메소드.
+    #
+    # asset_symbol:     확인하고자 하는 코인 
+    #
+    ####################################################################
     def account_positions(self, coin_symbol: str):
         try:
             response = self.um_futures_client.account(recvWindow=6000)
@@ -116,12 +121,14 @@ class UmFuture():
         return response
 
     ####################################################################
-    # candles_info(self, **kwargs)
-    # 잔고와 포지션을 조회하기 위한 메소드.
+    # candles_info(self, coin_symbol: str, time_info: str, data_limit=500)
+    # 캔들 정보를 확인하기 위한 메소드
     #
-    # recvWindow:   응답 대기시간(millisec)
+    # coin_symbol:      확인하고자 하는 코인
+    # time_info:        확인하고자 하는 시간 봉
+    # data_limit:       가져올 데이터의 수 제한
     #
-    # 포지션은 positionAmt 를 확인한다.(계약한 수량) long은 양수로, short는 음수로 나온다.
+    # 
     ####################################################################
     def candles_info(self, coin_symbol: str, time_info: str, data_limit=500):    
         candles = self.um_futures_client.klines(symbol=coin_symbol, interval=time_info, limit=data_limit)
@@ -139,6 +146,7 @@ class UmFuture():
             candle_volume.append(float(candle[5]))
             close_time.append(datetime.fromtimestamp(int(candle[6]) / 1000))
 
+        # 캔들시작시간, 시가, 고가, 저가, 종가, 거래량, 캔들종료시간
         df['Open_time'] = open_time
         df['Open'] = candle_open
         df['High'] = candle_high
@@ -149,6 +157,11 @@ class UmFuture():
         df.set_index(['Open_time'], inplace=True)
 
         return df
+#############################################################
+# 호가 조회 루틴
+# async function 
+#
+#############################################################
 
     async def set_data(self, key, value):
         self.data[key] = value
@@ -184,6 +197,11 @@ def reader(storage, key):
         loop = storage.loop
         value = loop.call_soon_threadsafe(asyncio.run_coroutine_threadsafe, storage.get_data(key), loop).result()
         #print(f"Data read: key={key}, value={value}")
+
+
+
+
+
 
 if __name__ == '__main__':
     um_future = UmFuture()
