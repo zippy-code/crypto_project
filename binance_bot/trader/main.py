@@ -14,7 +14,8 @@ import util
 import decorator
 from consts import *
 
-config_logging(logging, logging.INFO)
+# 로그 내용을 파일로 만들려면 세번째 인자에 파일 명을 설정하면 된다.
+config_logging(logging, logging.ERROR, "binance.log")
 
 """
 recvWindow: API 요청을 보내는 시점과 Binance API 서버에서 요청을 처리하는 시점의 차이
@@ -72,6 +73,10 @@ class Trader:
         """
         마진타입 설정
         :return:
+        
+        변경하려는 마진 타입이 기존설정과 동일한 경우, 아래와 같은 에러가 발생한다.
+        "code":-4096, "msg":"No need to change margin Type."
+        무시하고 넘어가도 된다.
         """
         try:
             logging.info('set_margin_type starts')
@@ -85,6 +90,20 @@ class Trader:
         """
         미체결 주문조회
         :return:
+        
+        주문 정보를 얻어오는 과정.
+        res 변수에는 과가 주문정보가 순서대로 들어있는 리스트.
+        따라서 리스트의 마지막 인자 (res[len(res) - 1])에는 가장 최근에 접수한 주문이 있다.
+        주문의 상태 값이 'NEW' 인지 확인해 조건에 해당하는 데이터가 있다면, 
+        self.new_order 변수에 저장한다.
+
+        sorted()
+        __iterable: 정렬 할 데이터 리스트
+        key: 정렬의 기준이 되는 값
+        reverse: True 이면 내림차순
+
+        key=lambda a: a['time']는 정렬 할 리스트 a의 time 값을 기준으로 정렬하겠다는 의미.
+
         """
         try:
             logging.info('get_new_order starts')
@@ -103,6 +122,22 @@ class Trader:
         """
         잔고/포지션 조회
         :return:
+
+        res에는 각각 assets, positions라는 Key값을 갖고 있고 Key에 해당하는 값으로는 리스트.
+        잔고조회는 assets을 확인.
+        이 중에서 asset의 이름이 USDT인 자산을 필터링해(filter) res에 저장
+        res_에 asset==USDT 조건을 만족하는 데이터를 list 형식으로 저장.
+        res_는 리스트이기 때문에 res_[0]['availableBalance'] 와 같이 [0]이 필요.
+
+        'availableBalance’가 바로 현재 사용가능한 잔고금액
+
+        포지션을 필터링 할 때 주의할 점.
+        res 에는 항상 데이터가 있다.
+        res['positions']에는 현재 보유포지션이 있건 없건 항상 Binance 거래소에서 제공하는 거래 페어목록이 저장되어 있다.
+        따라서 이 데이터들 중에서 실제로 보유중인 포지션을 구분하려면 'positionAmt'(보유수량) Key의 값이 있는지를 확인해야 한다.
+
+        float(res[0]['positionAmt']) != 0 라는 의미는 LONG or SHORT 포지션이 존재한다는 의미
+        res[0]['positionAmt']의 값이 양이면 LONG, 음수이면 SHORT
         """
         try:
             logging.info('get_balance_position starts')
@@ -162,6 +197,9 @@ class Trader:
         """
         포지션 오픈 조건확인
         :return:
+
+        현재 캔들의 band_b를 조회하려면
+        print(self.df_5m[-1:]['band_b'].values[0])
         """
         signal = None
         try:
@@ -185,6 +223,19 @@ class Trader:
         """
         포지션 오픈
         :return:
+
+        qty = quantitiy(주문 수량)
+        - 현재 이용 가능한 USDT 와 이용할 레버리지를 곱한 값을 주문 가격으로 나눔
+        - 해당 값에 0.95를 곱하는데 이는 증거금 부족 에러 방지를 위함.
+        - ETHUSDT 주문수량은 소수 세번째까지 된다. (다른 코인에 대해서는 확인 필요)
+
+        현재 5분봉 캔들의 종가(close)는 현재가격이므로 close에 저장한 현재가격과 주문가격(order_price)를 비교
+        주문가격은 최고매수/매도호가이기 때문에 현재가격과 큰 차이가 발생할 수 없지만, 금리발표 및 큰 호재/악재가 발생시에는 Binance
+        API에서 받아온 호가와 실제 가격 차이가 큰 경우가 종종있다. 
+        이렇게 순간적으로 가격의 급등락이 심할 때에는 트레이딩을 하지 않기 위해 넣은 조건
+        
+        주문수량이 0.004개 미만은 ETHUSDT의 최소주문수량을 충족시키지 못하기 때문에 Binance에서 주문접수를 거부
+
         """
         try:
             logging.info('open_position starts')
@@ -252,6 +303,10 @@ class Trader:
         """
         포지션 종료
         :return:
+
+        급등락 시, 수익이 아니라 손해라면, 그리고 손절 라인을 넘었다면, 
+        무조건 종료하도록 하는 코드가 필요할 듯 하다.
+
         """
         try:
             logging.info('close_position starts')
@@ -290,6 +345,8 @@ class Trader:
         """
         현재 진입포지션 수익률 계산
         :return:
+
+        수익률 = (손익금액) / (투입금액) * 100
         """
         profit_percent = float(self.position['unRealizedProfit']) / float(self.position['isolatedWallet']) * 100
         return profit_percent
@@ -299,6 +356,17 @@ class Trader:
         """
         주문체결 관리
         :return:
+
+        1)포지션 오픈/종료 주문 > 2)체결 > 3)잔고 및 보유 포지션 정보 업데이트
+        1)포지션 오픈/종료 주문 > 2)미체결 > 3)주문 취소 접수 > 3)잔고 및 보유 포지션 정보 업데이트
+
+        손절주문 시, 30분 대기보다 바로 현재가격으로 손절하는 함수 필요
+
+        origQty: 주문 접수수량
+        executedQty: 주문 체결수량
+
+        my_order[0]['origQty'] != my_order[0]['executedQty'] 일부만 체결된 경우, 처리 루틴도 필요하다.
+
         """
         try:
             logging.info('handle_new_order starts')
@@ -323,7 +391,8 @@ class Trader:
                 util.send_to_telegram("order is canceled")
                 self.new_order = None
                 self.get_balance_position()  # 잔고 및 포지션 변동 최신화
-
+        
+            # 주문 상태가 계속해서 NEW(접수)
             else:
                 # 취소 조건확인
                 ordered_time = datetime.fromtimestamp(int(order_time) / 1000)
@@ -346,6 +415,18 @@ class Trader:
         """
         프로그램 메인함수
         :return:
+
+        아래 각각의 프로세스는 개별적으로 진행
+        세 가지 케이스가 각각 따로 처리되며 동시에 일어날 수 없음
+
+        보유 포지션이 없는 경우
+        1)포지션 오픈조건 확인 > 2)포지션 오픈조건 충족 > 3)포지션 오픈 주문 접수 > 4)주문 체결관리
+        
+        보유 포지션이 있는 경우
+        1)포지션 종료조건 확인 > 2)포지션 종료조건 충족 > 3)포지션 종료 주문 접수 > 4)주문 체결관리
+
+        접수한 주문이 있는 경우
+        1)미체결 주문 존재 > 2)체결 or 미체결로 취소
         """
         if not self.is_init_success:
             logging.error('init_data got a error')
@@ -376,6 +457,9 @@ class Trader:
                         self.open_position(open_signal)  # 포지션 오픈
 
                 # 루프 대기 시간(* 1분)
+                # 매 루프마다 1분씩 sleep -> 보유 포지션이 없어서 포지션 오픈 조건을 확인할 경우
+                # 너무 많은 Binance API 호출을 하여 사용의 제한이 걸릴 수도 있기 때문.
+                # 5분봉 데이터를 사용하기 때문에 1분 주기로 포지션 오픈/종료 조건을 체크하는 것에 무리가 없다.
                 time.sleep(LOOP_INTERVAL)
             except Exception as e:
                 util.send_to_telegram("Program got a error")

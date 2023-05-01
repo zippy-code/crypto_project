@@ -9,6 +9,8 @@ import platform
 def call_binance_api(original_func):
     """
     Binance API 호출하며 서버시간에러 발생시 처리 데코레이터
+
+    900(0.9초)이상 차이가 난 것
     """
     def wrapper(*args, **kwargs):
         url = "https://fapi.binance.com/fapi/v1/time"

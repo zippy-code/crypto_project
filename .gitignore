@@ -1,3 +1,5 @@
 binance_bot/data/
 Binance
 Futures_trading
+binance_bot/trader/__pycache__/
+binance.log
