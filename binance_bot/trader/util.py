@@ -36,3 +36,8 @@ def send_to_telegram(message):
    if retries == max_retries:
        bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
        print("Telegram failed to retry...")
+
+
+## test 시 수행
+# if __name__ == "__main__":
+#     send_to_telegram("test")
