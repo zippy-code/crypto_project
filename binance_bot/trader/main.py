@@ -28,6 +28,7 @@ class Trader:
     def __init__(self):
         self.binance = UMFutures(key=API_KEY, secret=API_SECRET)
         self.position = None  # 현재 포지션
+        self.entry_price = None # 진입 가격
         self.balance = None   # USDT 잔고
         self.new_order = None  # 접수 주문
         self.df_5m = pd.DataFrame(columns=['Open_time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close_time'])  # 5분봉
@@ -156,6 +157,60 @@ class Trader:
             logging.error(traceback.format_exc())
 
     @decorator.call_binance_api
+    def open_position_by_signal(self, signal_result, signal_type):
+        if signal_result:
+            logging.info('open_position starts')
+            index, self.entry_price = signal_result[1], signal_result[2]
+
+            res = self.binance.book_ticker(SYMBOL)
+            ask_price = float(res['askPrice'])
+            bid_price = float(res['bidPrice'])
+            order_price = ask_price if signal_type == LONG else bid_price
+
+            # margin insufficient 에러 방지를 위해 0.95 보정
+            qty = float(self.balance) * LEVERAGE / order_price * 0.95
+            qty = float(f"{qty:,.3f}")  # 소수 3째자리
+
+            close = self.df_5m[-1:]['Close'].values[0]
+
+            # 주문가격과 현재 가격이 큰 차이가 발생한다면 가격 급등락 때이므로 주문하지 않도록 함
+            # 혹은 최소 주문 수량(0.004)보다 작다면 주문이 불가함
+            if abs(order_price - close) > 5 or qty < 0.004:
+                logging.info('stop open_position')
+                return
+            logging.info(order_price)
+            logging.info(qty)
+            order = self.binance.new_order(
+                symbol=SYMBOL,
+                side=SIGNAL_TO_OPEN_SIDE[signal_type],
+                type="LIMIT",
+                quantity=qty,
+                timeInForce="GTC",
+                price=entry_price,  # 미리 계산된 롱/숏 포지션 진입 가격
+            )
+
+            util.send_to_telegram("open_position is done")
+            logging.info(order)
+            self.new_order = []
+            self.new_order.append(order)
+
+    def check_close_signal_by_profit_loss(self, entry_price, current_price, fee_rate=0.00075):
+        take_profit_percentage = 0.03
+        stop_loss_percentage = 0.015
+
+        current_side = self.position['current_side']
+        entry_price = self.entry_price
+
+        pnl = (current_price / entry_price - 1) if current_side == LONG else (entry_price / current_price - 1)
+        pnl -= fee_rate * 2  # 반영된 수수료 차감
+
+        if pnl >= take_profit_percentage or pnl <= -stop_loss_percentage:
+            util.send_to_telegram("check_close_signal_by_profit_loss:ON")
+            return True
+        return False
+    
+
+    @decorator.call_binance_api
     def get_price(self):
         '''
         5분봉 데이터 조회
@@ -192,6 +247,7 @@ class Trader:
             util.send_to_telegram("Program got a error")
             util.send_to_telegram(traceback.format_exc())
             logging.error(traceback.format_exc())
+
 
     def check_open_signal(self):
         """
@@ -435,7 +491,7 @@ class Trader:
         logging.info('✅run starts')
         util.send_to_telegram("✅run starts")
         start_time = time.time()
-
+        count = 0
         while True:
             try:
                 self.get_price()  # 5분봉 데이터 조회
@@ -456,11 +512,20 @@ class Trader:
                     if open_signal:
                         self.open_position(open_signal)  # 포지션 오픈
 
+                #
+                #util.send_to_telegram("connecting.. and band_b:{}".format(band_b))
                 # 루프 대기 시간(* 1분)
                 # 매 루프마다 1분씩 sleep -> 보유 포지션이 없어서 포지션 오픈 조건을 확인할 경우
                 # 너무 많은 Binance API 호출을 하여 사용의 제한이 걸릴 수도 있기 때문.
                 # 5분봉 데이터를 사용하기 때문에 1분 주기로 포지션 오픈/종료 조건을 체크하는 것에 무리가 없다.
                 time.sleep(LOOP_INTERVAL)
+                count = count + 1
+                
+                if count == 60:
+                    band_b = self.df_5m[-1:]['band_b'].values[0]
+                    util.send_to_telegram("connecting.. and band_b:{}".format(band_b))
+                    count = 0
+        
             except Exception as e:
                 util.send_to_telegram("Program got a error")
                 util.send_to_telegram(traceback.format_exc())
